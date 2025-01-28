@@ -1,0 +1,7 @@
+.cache
+build
+DO_NOT_RESIZE
+SDL_symlink
+libs.json
+compile_commands.json
+tags
