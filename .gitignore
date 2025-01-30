@@ -5,3 +5,4 @@ SDL_symlink
 libs.json
 compile_commands.json
 tags
+a.out
