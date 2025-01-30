@@ -5,12 +5,14 @@
 
 
 /////static functions definitions
-static bool update_and_render(SDL_Renderer**, SDL_Window**);
+static bool update_and_render(SDL_Renderer**, SDL_Window**, SDL_Renderer**, SDL_Window**);
 static void draw_map_and_grid(SDL_Renderer*, const map_t, const int32_t, const int32_t);
 static bool key_pressed(SDL_KeyboardEvent, direction_t*, player_t*);
 static void mouse_callback(SDL_MouseButtonEvent);
-static bool is_a_wall(const Vector2, const map_t);
-static void render_player(SDL_Renderer**, const player_t);
+static int is_a_wall(const Vector2, const map_t);
+static camera_plane_t render_player(SDL_Renderer**, const player_t);
+static void render_fpv(SDL_Renderer**, camera_plane_t);
+static camera_plane_t generate_n_points_between(const Vector2_d, const Vector2_d, const size_t);
 static void update_camera_direction(const SDL_MouseMotionEvent, player_t*);
 
 //make these suckers const or sth
@@ -20,22 +22,24 @@ static void draw_square(SDL_Renderer**, int32_t, int32_t);
 static unsigned HEIGHT = 640;
 static unsigned WIDTH = 640;
 
+static unsigned HEIGHT_2 = 1080;
+static unsigned WIDTH_2 = 1920;
+
 const int height = 50;
 const int width  = 50;
 
 const int num_col = 10;
 const int num_row = 10;
 
-static Vector2 coords[100];
 static Vector2 starting_point;
 
 const int g_map[10][10] =
 {
 	{0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-	{0, 1, 1, 0, 0, 0, 0, 0, 0, 0},
+	{0, 1, 3, 0, 0, 0, 0, 0, 0, 0},
 	{0, 0, 1, 0, 0, 1, 0, 0, 0, 0},
-	{0, 0, 1, 0, 0, 1, 0, 0, 0, 0},
-	{0, 0, 1, 1, 1, 0, 0, 0, 0, 0},
+	{0, 0, 2, 0, 0, 1, 0, 0, 0, 0},
+	{0, 0, 1, 4, 1, 5, 0, 0, 0, 0},
 	{0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 	{0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 	{0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
@@ -55,18 +59,22 @@ Vector2 get_ingame_coordinates(Vector2 _vec)
 	return _vec;
 }
 
-player_t player;
+static player_t player;
 
-static bool update_and_render(SDL_Renderer** _renderer, SDL_Window** _window)
+static bool update_and_render(SDL_Renderer** _renderer, SDL_Window** _window,
+						SDL_Renderer** _renderer_game, SDL_Window** _window_game)
 {
 	SDL_Event e;
 	bool should_quit		= false;
 	direction_t direction	= STATIC;
+	camera_plane_t fov;
 
 	while (SDL_PollEvent(&e) != 0)
 	{
 		SDL_SetRenderDrawColor(*_renderer, 9, 0, 0, 0);
+		SDL_SetRenderDrawColor(*_renderer_game, 9, 0, 0, 0);
 		SDL_RenderClear(*_renderer);
+		SDL_RenderClear(*_renderer_game);
 		draw_map_and_grid(*_renderer, g_map, 10, 10);
 
 		switch(e.type)
@@ -86,11 +94,16 @@ static bool update_and_render(SDL_Renderer** _renderer, SDL_Window** _window)
 				break;
 		}
 
-		render_player(_renderer, player);
+		fov = render_player(_renderer, player);
+
+		render_fpv(_renderer_game, fov);
 
 		SDL_RenderPresent(*_renderer);
+		SDL_RenderPresent(*_renderer_game);
 	}
 
+	/*if(fov.points != NULL)*/
+	/*	free(fov.points);*/
 	return should_quit;
 }
 
@@ -158,32 +171,34 @@ static bool is_outside_map(const Vector2 _point)
 	return false;
 }
 
-static bool is_a_wall(const Vector2 _point, const map_t _map)
+static int is_a_wall(const Vector2 _point, const map_t _map)
 {
 	Vector2 local_point = get_ingame_coordinates(_point);
 
 	if(is_outside_map(_point))
 	{
-		printf("hit wall 1\n");
-		return true;
+		//printf("hit wall 1\n");
+		return 0;
 	}
 
-	if(_point.x % width == 0)
-	{
-		printf("hit wall 2\n");
-		if(_map[local_point.y][local_point.x] > 0 ||
-				_map[local_point.y][local_point.x - 1] > 0)
-			return true;
-	}
 	if(_point.y % height == 0)
 	{
-		printf("hit wall 3\n");
-		if(_map[local_point.y][local_point.x] > 0 ||
-				_map[local_point.y - 1][local_point.x] > 0)
-			return true;
+		//printf("hit wall 3\n");
+		if(_map[local_point.y][local_point.x] > 0)
+			return _map[local_point.y][local_point.x];
+		if(_map[local_point.y - 1][local_point.x] > 0)
+			return _map[local_point.y - 1][local_point.x];
+	}
+	if(_point.x % width == 0)
+	{
+		//printf("hit wall 2\n");
+		if(_map[local_point.y][local_point.x] > 0)
+			return _map[local_point.y][local_point.x];
+		if(_map[local_point.y][local_point.x - 1] > 0)
+			return _map[local_point.y][local_point.x - 1];
 	}
 
-	return false;
+	return -1;
 }
 
 static void update_camera_direction(const SDL_MouseMotionEvent _e,
@@ -203,14 +218,13 @@ static void draw_square(SDL_Renderer** _renderer, int32_t col_num, int32_t row_n
 	cell.w = width;
 	cell.h = height;
 
-	SDL_SetRenderDrawColor(*_renderer, 210, 144, 114, 100);
 	SDL_RenderFillRect(*_renderer, &cell);
 	SDL_SetRenderDrawColor(*_renderer, 9, 100, 100, 100);
 
 	return;
 }
 
-static void render_ray(SDL_Renderer** _renderer,
+static int render_ray(SDL_Renderer** _renderer,
 						const Vector2 _source,
 						const Vector2 _direction)
 {
@@ -251,6 +265,7 @@ static void render_ray(SDL_Renderer** _renderer,
 	double a = _direction.y - _source.y;
 	double b = _source.x - _direction.x;
 	double c = a * (double)_source.x + b * (double)_source.y;
+	int current_texture = -1;
 
 	SDL_SetRenderDrawColor(*_renderer, 144, 39, 89, 100);
 	if(_source.x > _direction.x)
@@ -263,11 +278,13 @@ static void render_ray(SDL_Renderer** _renderer,
 			if(b == 0) continue;
 			current.y = (c - (a * (double)j))/b;
 
-			if(!is_a_wall(current, g_map))
+			int collision_object = is_a_wall(current, g_map);
+			if(collision_object < 0)
 			{
 				continue;
 			}
-			printf("1\n");
+			current_texture = collision_object;
+			//printf("1\n");
 			found_target = true;
 			closest = current;
 			break;
@@ -276,18 +293,20 @@ static void render_ray(SDL_Renderer** _renderer,
 	else
 	{
 		int32_t start = _source.x + (width - (_source.x % width));
-		printf("starting value:%d\n", start);
+		//printf("starting value:%d\n", start);
 		for(int32_t j = start; j <= width * num_col; j += width)
 		{
 			current.x = (int32_t)j;
 			if(b == 0) continue;
 			current.y = (c - (a * (double)j))/b;
 
-			if(!is_a_wall(current, g_map))
+			int collision_object = is_a_wall(current, g_map);
+			if(collision_object < 0)
 			{
 				continue;
 			}
-			printf("2\n");
+			current_texture = collision_object;
+			//printf("2\n");
 			found_target = true;
 			closest = current;
 			break;
@@ -307,18 +326,20 @@ static void render_ray(SDL_Renderer** _renderer,
 			current.y = (int32_t)j;
 			if(b == 0) continue;
 			current.x = (c - (a * (double)j))/b;
-			if(!is_a_wall(current, g_map))
+			int collision_object = is_a_wall(current, g_map);
+			if(collision_object < 0)
 			{
 				continue;
 			}
-			printf("3\n");
+			current_texture = collision_object;
+			//printf("3\n");
 			found_target = true;
 
 			if(closest.x == 0 && closest.y == 0)
 			{
 				SDL_SetRenderDrawColor(*_renderer, 200, 144, 44, 100);
 				closest = current;
-				printf("3 - updating\n");
+				//printf("3 - updating\n");
 			}
 			else
 			{
@@ -326,7 +347,7 @@ static void render_ray(SDL_Renderer** _renderer,
 				{
 					SDL_SetRenderDrawColor(*_renderer, 200, 144, 44, 100);
 					closest = current;
-				printf("3 - updating\n");
+				//printf("3 - updating\n");
 				}
 			}
 			break;
@@ -340,11 +361,13 @@ static void render_ray(SDL_Renderer** _renderer,
 			current.y = (int32_t)j;
 			if(b == 0) continue;
 			current.x = (c - (a * (double)j))/b;
-			if(!is_a_wall(current, g_map))
+			int collision_object = is_a_wall(current, g_map);
+			if(collision_object < 0)
 			{
 				continue;
 			}
-			printf("4\n");
+			current_texture = collision_object;
+			//printf("4\n");
 			found_target = true;
 
 			if(closest.x == 0 && closest.y == 0)
@@ -369,14 +392,16 @@ static void render_ray(SDL_Renderer** _renderer,
 		SDL_RenderLine(*_renderer, _source.x, _source.y, closest.x, closest.y);
 	else
 		SDL_RenderLine(*_renderer, _source.x, _source.y, _direction.x, _direction.y);
+	return current_texture;
 }
 
-static void render_ray_d(SDL_Renderer** _renderer,
+static texture_with_distance render_ray_d(SDL_Renderer** _renderer,
 						const Vector2 _source,
-						const Vector2_d _direction)
+						const Vector2_d _direction,
+						const bool draw)
 {
 	int32_t b_x, e_x, b_y, e_y;
-
+	texture_with_distance ret;
 	if(_source.x > _direction.x)
 	{
 		b_x = _direction.x;
@@ -406,6 +431,7 @@ static void render_ray_d(SDL_Renderer** _renderer,
 	Vector2 current;
 	current.x = 0;
 	current.y = 0;
+	int current_texture = -1;
 
 	bool found_target = false;
 	//calculate linear equation for this sucker
@@ -413,7 +439,7 @@ static void render_ray_d(SDL_Renderer** _renderer,
 	double b = _source.x - _direction.x;
 	double c = a * (double)_source.x + b * (double)_source.y;
 
-	SDL_SetRenderDrawColor(*_renderer, 144, 39, 89, 100);
+	//SDL_SetRenderDrawColor(*_renderer, 144, 39, 89, 100);
 	if(_source.x > _direction.x)
 	{
 		int32_t start = _source.x - (_source.x % width);
@@ -424,11 +450,13 @@ static void render_ray_d(SDL_Renderer** _renderer,
 			if(b == 0) continue;
 			current.y = (c - (a * (double)j))/b;
 
-			if(!is_a_wall(current, g_map))
+			int collision_object = is_a_wall(current, g_map);
+			if(collision_object < 0)
 			{
 				continue;
 			}
-			printf("1\n");
+			current_texture = collision_object;
+
 			found_target = true;
 			closest = current;
 			break;
@@ -437,18 +465,20 @@ static void render_ray_d(SDL_Renderer** _renderer,
 	else
 	{
 		int32_t start = _source.x + (width - (_source.x % width));
-		printf("starting value:%d\n", start);
+		//printf("starting value:%d\n", start);
 		for(int32_t j = start; j <= width * num_col; j += width)
 		{
 			current.x = (int32_t)j;
 			if(b == 0) continue;
 			current.y = (c - (a * (double)j))/b;
 
-			if(!is_a_wall(current, g_map))
+			int collision_object = is_a_wall(current, g_map);
+			if(collision_object < 0)
 			{
 				continue;
 			}
-			printf("2\n");
+			current_texture = collision_object;
+			//printf("2\n");
 			found_target = true;
 			closest = current;
 			break;
@@ -468,26 +498,29 @@ static void render_ray_d(SDL_Renderer** _renderer,
 			current.y = (int32_t)j;
 			if(b == 0) continue;
 			current.x = (c - (a * (double)j))/b;
-			if(!is_a_wall(current, g_map))
+			int collision_object = is_a_wall(current, g_map);
+			if(collision_object < 0)
 			{
 				continue;
 			}
-			printf("3\n");
+			//printf("3\n");
 			found_target = true;
 
 			if(closest.x == 0 && closest.y == 0)
 			{
-				SDL_SetRenderDrawColor(*_renderer, 200, 144, 44, 100);
+				//SDL_SetRenderDrawColor(*_renderer, 200, 144, 44, 100);
 				closest = current;
-				printf("3 - updating\n");
+				current_texture = collision_object;
+				//printf("3 - updating\n");
 			}
 			else
 			{
 				if(get_distance(_source, current) < get_distance(_source, closest))
 				{
-					SDL_SetRenderDrawColor(*_renderer, 200, 144, 44, 100);
+					//SDL_SetRenderDrawColor(*_renderer, 200, 144, 44, 100);
 					closest = current;
-				printf("3 - updating\n");
+					current_texture = collision_object;
+				//printf("3 - updating\n");
 				}
 			}
 			break;
@@ -501,41 +534,55 @@ static void render_ray_d(SDL_Renderer** _renderer,
 			current.y = (int32_t)j;
 			if(b == 0) continue;
 			current.x = (c - (a * (double)j))/b;
-			if(!is_a_wall(current, g_map))
+			int collision_object = is_a_wall(current, g_map);
+			if(collision_object < 0)
 			{
 				continue;
 			}
-			printf("4\n");
+			//printf("4\n");
 			found_target = true;
 
 			if(closest.x == 0 && closest.y == 0)
 			{
-				SDL_SetRenderDrawColor(*_renderer, 200, 144, 44, 100);
+				//SDL_SetRenderDrawColor(*_renderer, 200, 144, 44, 100);
 				closest = current;
+				current_texture = collision_object;
 			}
 			else
 			{
 				if(get_distance(_source, current) < get_distance(_source, closest))
 				{
-					SDL_SetRenderDrawColor(*_renderer, 200, 144, 44, 100);
+					//SDL_SetRenderDrawColor(*_renderer, 200, 144, 44, 100);
 					closest = current;
+					current_texture = collision_object;
 				}
 			}
 			break;
 		}
 	}
 
-	draw_circle(_renderer, (int32_t)closest.x, (int32_t)closest.y, 5, true);
-	if(found_target)
-		SDL_RenderLine(*_renderer, _source.x, _source.y, closest.x, closest.y);
-	else
-		SDL_RenderLine(*_renderer, _source.x, _source.y, _direction.x, _direction.y);
+	if(draw)
+	{
+		draw_circle(_renderer, (int32_t)closest.x, (int32_t)closest.y, 5, true);
+		if(found_target)
+			SDL_RenderLine(*_renderer, _source.x, _source.y, closest.x, closest.y);
+		else
+			SDL_RenderLine(*_renderer, _source.x, _source.y, _direction.x, _direction.y);
+	}
+
+	ret.texture = current_texture;
+	ret.distance = get_distance(_source, closest);
+	return ret;
 }
 
 static camera_plane_t render_camera_plane(SDL_Renderer** _renderer,
 								const player_t _player_ctx)
 {
-	camera_plane_t ret_plane = (camera_plane_t)malloc(3 * sizeof(Vector2_d));
+	camera_plane_t ret_plane;
+	ret_plane.points = (Vector2_d*)malloc(3 * sizeof(Vector2_d));
+	ret_plane.texture = (int*)malloc(3 * (sizeof(int)));
+	ret_plane.distance = (double*)malloc(3 * (sizeof(double)));
+	ret_plane.size = 3;
 
 	const double distance = 100.0;
 
@@ -585,29 +632,118 @@ static camera_plane_t render_camera_plane(SDL_Renderer** _renderer,
 	draw_circle(_renderer, (int32_t)new_point2.x, (int32_t)new_point2.y, 5, true);
 	draw_circle(_renderer, (int32_t)new_point3.x, (int32_t)new_point3.y, 5, true);
 	SDL_RenderLine(*_renderer, new_point2.x, new_point2.y, new_point3.x, new_point3.y);
-	*ret_plane = new_point;
-	*(ret_plane + 1) = new_point2;
-	*(ret_plane + 2) = new_point3;
+	*ret_plane.points = new_point;
+	*(ret_plane.points + 1) = new_point2;
+	*(ret_plane.points + 2) = new_point3;
 	return ret_plane;
 }
 
-static void render_player(SDL_Renderer** _renderer, const player_t _player_ctx)
+static camera_plane_t generate_n_points_between(const Vector2_d _p1,
+			const Vector2_d _p2, const size_t _amount)
+{
+	//TODO: when there is no change in y this thing will not rend anything
+	camera_plane_t ret;
+	ret.size = _amount;
+	ret.points = (Vector2_d*)malloc(ret.size * sizeof(Vector2_d));
+	ret.texture = (int*)malloc(ret.size * (sizeof(int)));
+	ret.distance = (double*)malloc(ret.size * (sizeof(double)));
+	//do we subtract these 2 points from total?
+
+	Vector2_d versor;
+	versor.x = (double)(_p1.x - _p2.x);
+	versor.y = (double)(_p1.y - _p2.y);
+
+	double temp_dist = get_distance_d(_p1, _p2);
+	double step = temp_dist / _amount;
+
+	Vector2_d unit_vec;
+	unit_vec.x = versor.x / temp_dist;
+	unit_vec.y = versor.y / temp_dist;
+
+
+	for(int i = 0; i < _amount; ++i)
+	{
+		(ret.points + i)->x = _p2.x + unit_vec.x * i * step;
+		(ret.points + i)->y = _p2.y + unit_vec.y * i * step;
+	}
+
+	return ret;
+}
+
+static camera_plane_t render_player(SDL_Renderer** _renderer, const player_t _player_ctx)
 {
 	SDL_SetRenderDrawColor(*_renderer, 244, 244, 0, 0);
 	draw_circle(_renderer, (int32_t)_player_ctx.x, (int32_t)_player_ctx.y, 15, true);
 	SDL_SetRenderDrawColor(*_renderer, 9, 100, 100, 100);
 	Vector2 temp_pos = {.x = _player_ctx.x, .y = _player_ctx.y};
-	render_ray(_renderer, temp_pos, _player_ctx.camera_direction);
+	//render_ray(_renderer, temp_pos, _player_ctx.camera_direction);
 	//render camera plane
 	camera_plane_t test = render_camera_plane(_renderer, _player_ctx);
 
-	for(int i = 0; i < 3; ++i)
+	for(int i = 0; i < test.size; ++i)
 	{
-		render_ray_d(_renderer, temp_pos, *(test + i));
+		render_ray_d(_renderer, temp_pos, *(test.points + i), true);
+	}
+	// treating last 2 points as boundries
+	camera_plane_t test2 =
+		generate_n_points_between(
+			*(test.points + 1),
+			*(test.points + 2),
+			WIDTH_2);
+
+	for(int i = 0; i < test2.size; ++i)
+	{
+		if(i > 0)
+			SDL_SetRenderDrawColor(*_renderer, i * 2, i * 1, 255/i, 100);
+
+		texture_with_distance temp = render_ray_d(_renderer,
+				temp_pos, *(test2.points + i), false);
+		*(test2.texture + i)  = temp.texture;
+		*(test2.distance + i) = temp.distance;
 	}
 
 	//does this work this way?
-	free(test);
+	free(test.points);
+	return test2;
+}
+
+static void render_fpv(SDL_Renderer** _renderer, camera_plane_t _fov)
+{
+	const size_t local_height = HEIGHT_2;
+	int temp_size = 0;
+	printf("fov size:%d\n", _fov.size);
+	for(int i = 0; i < _fov.size; ++i)
+	{
+		Vector2_d ray;
+		temp_size = local_height - (*(_fov.distance + i) * 2);
+		switch(*(_fov.texture + i))
+		{
+			case 0:
+				SDL_SetRenderDrawColor(*_renderer, 10, 10, 10, 50);
+				break;
+			case 1:
+				SDL_SetRenderDrawColor(*_renderer, 10, 10, 129, 50);
+				break;
+			case 2:
+				SDL_SetRenderDrawColor(*_renderer, 10, 80, 80, 50);
+				break;
+			case 3:
+				SDL_SetRenderDrawColor(*_renderer, 10, 130, 10, 50);
+				break;
+			case 4:
+				SDL_SetRenderDrawColor(*_renderer, 80, 80, 10, 50);
+				break;
+			case 5:
+				SDL_SetRenderDrawColor(*_renderer, 130, 10, 10, 50);
+				break;
+			default:
+				SDL_SetRenderDrawColor(*_renderer, 0, 0, 0, 50);
+				break;
+		}
+
+		float padding = (local_height - temp_size)/2;
+		SDL_RenderLine(*_renderer, _fov.size - i, 0 + padding, _fov.size - i, local_height - padding);
+	}
 }
 
 static bool key_pressed(SDL_KeyboardEvent _e, direction_t* _dir,
@@ -647,17 +783,6 @@ static void mouse_callback(SDL_MouseButtonEvent _e)
 {
 	starting_point.x = (int32_t)_e.x;
 	starting_point.y = (int32_t)_e.y;
-
-	for(int i = 0; i < 100; ++i)
-	{
-		if(coords[i].x == 0 && coords[i].y == 0)
-		{
-			coords[i].x = (int32_t)_e.x;
-			coords[i].y = (int32_t)_e.y;
-			return;
-		}
-	}
-	printf("circle limit reached\n");
 }
 
 static void draw_map_and_grid(SDL_Renderer* _renderer, const map_t _map,
@@ -678,7 +803,31 @@ static void draw_map_and_grid(SDL_Renderer* _renderer, const map_t _map,
 	{
 		for(int j = 0; j < num_row; ++j)
 		{
-			if(_map[i][j] > 0) draw_square(&_renderer, j, i);
+			if(_map[i][j] < 0) continue;
+			switch(_map[i][j])
+			{
+				case 0:
+					SDL_SetRenderDrawColor(_renderer, 10, 10, 10, 50);
+					break;
+				case 1:
+					SDL_SetRenderDrawColor(_renderer, 10, 10, 129, 50);
+					break;
+				case 2:
+					SDL_SetRenderDrawColor(_renderer, 10, 80, 80, 50);
+					break;
+				case 3:
+					SDL_SetRenderDrawColor(_renderer, 10, 130, 10, 50);
+					break;
+				case 4:
+					SDL_SetRenderDrawColor(_renderer, 80, 80, 10, 50);
+					break;
+				case 5:
+					SDL_SetRenderDrawColor(_renderer, 130, 10, 10, 50);
+					break;
+				default:
+					SDL_SetRenderDrawColor(_renderer, 0, 0, 0, 50);
+					break;
+			}draw_square(&_renderer, j, i);
 		}
 	}
 }
@@ -687,33 +836,50 @@ void run_game()
 {
 	SDL_Init(SDL_INIT_VIDEO);
 
-	struct SDL_Window* wind;
-	struct SDL_Renderer* rend;
+	struct SDL_Window* wind_map;
+	struct SDL_Renderer* rend_map;
+
+	struct SDL_Window* wind_game;
+	struct SDL_Renderer* rend_game;
 
 	player.x = WIDTH/2;
 	player.y = HEIGHT/2;
-	memset(coords, 0, 100);
+
+	SDL_CreateWindowAndRenderer("DO_NOT_RESIZE", WIDTH_2, HEIGHT_2,
+			SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE , &wind_game, &rend_game);
 
 	SDL_CreateWindowAndRenderer("DO_NOT_RESIZE", HEIGHT, WIDTH,
-			SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE , &wind, &rend);
+			SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE , &wind_map, &rend_map);
 
 	bool quit = false;
 	while (!quit)
 	{
-		quit = update_and_render(&rend, &wind);
+		quit = update_and_render(&rend_map, &wind_map, &rend_game, &wind_game);
 	}
 
 
 	// free
-	if (rend != NULL)
+	if (rend_map != NULL)
 	{
-		SDL_DestroyRenderer(rend);
-		rend = NULL;
+		SDL_DestroyRenderer(rend_map);
+		rend_map = NULL;
 	}
-	if (wind!= NULL)
+	if (wind_map!= NULL)
 	{
-		SDL_DestroyWindow(wind);
-		wind = NULL;
+		SDL_DestroyWindow(wind_map);
+		wind_map = NULL;
+	}
+
+	// free_game
+	if (rend_game != NULL)
+	{
+		SDL_DestroyRenderer(rend_game);
+		rend_game = NULL;
+	}
+	if (wind_game!= NULL)
+	{
+		SDL_DestroyWindow(wind_game);
+		wind_game = NULL;
 	}
 	SDL_Quit();
 }

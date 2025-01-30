@@ -28,7 +28,20 @@ typedef struct vec_d
 	double y;
 }Vector2_d;
 
-typedef Vector2_d* camera_plane_t;
+typedef struct
+{
+	int texture;
+	double distance;
+}texture_with_distance;
+
+typedef struct
+{
+	Vector2_d* points;
+	int* texture;
+	double* distance;
+	size_t size;
+}camera_plane_t;
+
 
 typedef struct player
 {
