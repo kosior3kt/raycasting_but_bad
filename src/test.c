@@ -1,33 +1,35 @@
 #include <stdio.h>
+#include <math.h>
 
 struct point
 {
-	double x, y;
+	float x, y;
 };
 
+
+static float deg2rad(float _deg)
+{
+	return (_deg * (M_PI/180));
+}
 int main()
 {
+	struct point p1;
+	//struct point p2;
+	p1.x = 1.0;
+	p1.y = 0.0;
 
-	struct point P, Q;
-	P.x = 240;
-	P.y = 320;
-	Q.x = 119;
-	Q.y = 331;
+	//float theta = 1.5708;
+	float theta = deg2rad(-90);
 
-	double a = Q.y - P.y;
-	double b = P.x - Q.x;
-	double c = a * (double)P.x + b * (double)P.y;
+	float cs = cos(theta);
+	float sn = sin(theta);
 
-	// ax + by = c
-	// y = ( c - ax )/b
-	double temp_y = (c - (a))/b;
+	float x = p1.x * cs - p1.y * sn;
+	float y = p1.x * sn + p1.y * cs;
 
-	double x = 0;
+	printf("before x:%f, y:%f\n", p1.x, p1.y);
+	printf("after x:%f, y:%f\n", x, y);
 
-	printf("a: %f, b: %f, c: %f\n", a, b, c);
-	scanf("%d", &x);
-	double y = (c - (a * x))/b;
-	printf("y: %f, x: %d\n", y, x);
 
 	return 0;
 }

@@ -14,13 +14,15 @@ static camera_plane_t render_player(SDL_Renderer**, const player_t);
 static void render_fpv(SDL_Renderer**, camera_plane_t);
 static camera_plane_t generate_n_points_between(const Vector2_d, const Vector2_d, const size_t);
 static void update_camera_direction(const SDL_MouseMotionEvent, player_t*);
-
+static void handle_mouse_movement(const SDL_MouseMotionEvent, player_t*);
+static void rotate_player(player_t* _player_ctx, const degrees_t amount);
+static float deg2rad(float _deg);
 //make these suckers const or sth
 static void draw_square(SDL_Renderer**, int32_t, int32_t);
 /////////end of definitions
 
-static unsigned HEIGHT = 640;
-static unsigned WIDTH = 640;
+static unsigned HEIGHT = 500;
+static unsigned WIDTH = 500;
 
 static unsigned HEIGHT_2 = 1080;
 static unsigned WIDTH_2 = 1920;
@@ -90,7 +92,7 @@ static bool update_and_render(SDL_Renderer** _renderer, SDL_Window** _window,
 				mouse_callback(*(SDL_MouseButtonEvent*)&e);
 				break;
 			case SDL_EVENT_MOUSE_MOTION:
-				update_camera_direction(*(SDL_MouseMotionEvent*)&e, &player);
+				handle_mouse_movement(*(SDL_MouseMotionEvent*)&e, &player);
 				break;
 		}
 
@@ -171,6 +173,13 @@ static bool is_outside_map(const Vector2 _point)
 	return false;
 }
 
+static bool is_outside_map_d(const Vector2_d _point)
+{
+	if(_point.x >= width * num_col  || _point.x <= 0) return true;
+	if(_point.y >= height * num_row || _point.y <= 0) return true;
+	return false;
+}
+
 static int is_a_wall(const Vector2 _point, const map_t _map)
 {
 	Vector2 local_point = get_ingame_coordinates(_point);
@@ -201,13 +210,42 @@ static int is_a_wall(const Vector2 _point, const map_t _map)
 	return -1;
 }
 
-static void update_camera_direction(const SDL_MouseMotionEvent _e,
-									player_t* _player_ctx)
+static float deg2rad(float _deg)
 {
-	_player_ctx->camera_direction.x = _e.x;
-	_player_ctx->camera_direction.y = _e.y;
+	return (_deg * (M_PI/180));
 }
 
+static void rotate_player(player_t* _player_ctx, const degrees_t _amount)
+{
+	float theta = deg2rad(_amount);
+
+	float local_x = _player_ctx->camera_direction.x;
+	float local_y = _player_ctx->camera_direction.y;
+
+	float sn = sin(theta);
+	float cs = cos(theta);
+
+	float x = cs * local_x - sn * local_y;
+	float y = sn * local_x + cs * local_y;
+
+	printf("x:%f, y:%f\n", x, y);
+
+	_player_ctx->camera_direction.x = x;
+	_player_ctx->camera_direction.y = y;
+}
+
+static void handle_mouse_movement(const SDL_MouseMotionEvent _e,
+									player_t* _player_ctx)
+{
+	//printf("relative displacement x:%f, y:%f\n", _e.xrel, _e.yrel);
+	//_player_ctx
+	//printf("should rotate by: %f deg\n", _e.xrel/5);
+	printf("current camera direction vector: x:%d, y:%d \n",
+			_player_ctx->camera_direction.x,
+			_player_ctx->camera_direction.y);
+
+	rotate_player(_player_ctx, _e.xrel/5);
+}
 
 //make it const
 static void draw_square(SDL_Renderer** _renderer, int32_t col_num, int32_t row_num)
@@ -587,22 +625,12 @@ static camera_plane_t render_camera_plane(SDL_Renderer** _renderer,
 	const double distance = 100.0;
 
 	Vector2_d versor;
-	versor.x = (double)(_player_ctx.camera_direction.x - _player_ctx.x);
-	versor.y = (double)(_player_ctx.camera_direction.y - _player_ctx.y);
-
-	Vector2_d p1;
-	p1.x = _player_ctx.camera_direction.x;
-	p1.y = _player_ctx.camera_direction.y;
-
-	Vector2_d p2;
-	p2.x = _player_ctx.x;
-	p2.y = _player_ctx.y;
-
-	double temp_dist = get_distance_d(p1, p2);
+	versor.x = (double)(_player_ctx.camera_direction.x);
+	versor.y = (double)(_player_ctx.camera_direction.y);
 
 	Vector2_d unit_vec;
-	unit_vec.x = versor.x / temp_dist;
-	unit_vec.y = versor.y / temp_dist;
+	unit_vec.x = versor.x;
+	unit_vec.y = versor.y;
 
 	Vector2_d new_point;
 	new_point.x = _player_ctx.x + unit_vec.x * distance;
@@ -628,7 +656,7 @@ static camera_plane_t render_camera_plane(SDL_Renderer** _renderer,
 	new_point3.y = new_point.y + unit_vec3.y * distance/2;
 
 	SDL_SetRenderDrawColor(*_renderer, 139, 11, 69, 100);
-	draw_circle(_renderer, (int32_t)new_point.x, (int32_t)new_point.y, 5, true);
+	draw_circle(_renderer, (int32_t)new_point.x,  (int32_t)new_point.y, 5, true);
 	draw_circle(_renderer, (int32_t)new_point2.x, (int32_t)new_point2.y, 5, true);
 	draw_circle(_renderer, (int32_t)new_point3.x, (int32_t)new_point3.y, 5, true);
 	SDL_RenderLine(*_renderer, new_point2.x, new_point2.y, new_point3.x, new_point3.y);
@@ -711,11 +739,10 @@ static void render_fpv(SDL_Renderer** _renderer, camera_plane_t _fov)
 {
 	const size_t local_height = HEIGHT_2;
 	int temp_size = 0;
-	printf("fov size:%d\n", _fov.size);
 	for(int i = 0; i < _fov.size; ++i)
 	{
 		Vector2_d ray;
-		temp_size = local_height - (*(_fov.distance + i) * 2);
+		temp_size = local_height - (   (*(_fov.distance + i)) * 2);
 		switch(*(_fov.texture + i))
 		{
 			case 0:
@@ -742,7 +769,9 @@ static void render_fpv(SDL_Renderer** _renderer, camera_plane_t _fov)
 		}
 
 		float padding = (local_height - temp_size)/2;
-		SDL_RenderLine(*_renderer, _fov.size - i, 0 + padding, _fov.size - i, local_height - padding);
+		SDL_RenderLine(*_renderer, _fov.size - i,
+				padding, _fov.size - i,
+				local_height - padding);
 	}
 }
 
@@ -753,27 +782,61 @@ static bool key_pressed(SDL_KeyboardEvent _e, direction_t* _dir,
 
 	//leave this for now - in future i will be doing some
 	//more advanced controls here
+
+	//TODO: make it 'glide' on the wall - update x and y separately when would
+	//not go outside of map
+	Vector2_d where_would_be;
+	where_would_be.x = _player_ctx->x;
+	where_would_be.y = _player_ctx->y;
+
 	switch(_e.key)
 	{
+		case SDLK_UP:
 		case SDLK_W:
 			*_dir = UP;
-			_player_ctx->y -= 10;
+			where_would_be.x += _player_ctx->camera_direction.x * 5;
+			where_would_be.y += _player_ctx->camera_direction.y * 5;
 			break;
+		case SDLK_DOWN:
 		case SDLK_S:
 			*_dir = DOWN;
-			_player_ctx->y += 10;
+			where_would_be.x -= _player_ctx->camera_direction.x * 5;
+			where_would_be.y -= _player_ctx->camera_direction.y * 5;
 			break;
+		case SDLK_LEFT:
 		case SDLK_A:
 			*_dir = LEFT;
-			_player_ctx->x -= 10;
+			where_would_be.x += _player_ctx->camera_direction.y * 5;
+			where_would_be.y -= _player_ctx->camera_direction.x * 5;
 			break;
+		case SDLK_RIGHT:
 		case SDLK_D:
 			*_dir = RIGHT;
-			_player_ctx->x += 10;
+			where_would_be.x -= _player_ctx->camera_direction.y * 5;
+			where_would_be.y += _player_ctx->camera_direction.x * 5;
 			break;
 		case SDLK_ESCAPE:
 			return 1;
 	}
+
+	//do pre update check of validity
+
+	Vector2_d temp;
+	temp.x = _player_ctx->x;
+	temp.y = where_would_be.y;
+	if(!is_outside_map_d(temp))
+		_player_ctx->y = where_would_be.y;
+	else
+		temp.y = _player_ctx->y;
+
+	temp.x = where_would_be.x;
+	if(!is_outside_map_d(temp))
+		_player_ctx->x = where_would_be.x;
+	else
+		temp.x = _player_ctx->x;
+
+	_player_ctx->x = temp.x;
+	_player_ctx->y = temp.y;
 
 
 	return 0;
@@ -842,14 +905,19 @@ void run_game()
 	struct SDL_Window* wind_game;
 	struct SDL_Renderer* rend_game;
 
+
 	player.x = WIDTH/2;
 	player.y = HEIGHT/2;
+	player.camera_direction.x = 1;
+	player.camera_direction.y = 0;
 
 	SDL_CreateWindowAndRenderer("DO_NOT_RESIZE", WIDTH_2, HEIGHT_2,
 			SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE , &wind_game, &rend_game);
 
 	SDL_CreateWindowAndRenderer("DO_NOT_RESIZE", HEIGHT, WIDTH,
 			SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE , &wind_map, &rend_map);
+
+	SDL_SetWindowRelativeMouseMode(wind_game, true);
 
 	bool quit = false;
 	while (!quit)

@@ -4,8 +4,10 @@
 #include <stdio.h>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_asyncio.h>
+#include <SDL3/SDL_mouse.h>
 
 typedef int map_t[10][10];
+typedef int degrees_t;
 typedef enum
 {
 	STATIC = 0,
@@ -45,9 +47,9 @@ typedef struct
 
 typedef struct player
 {
-	int32_t x;
-	int32_t y;
-	Vector2 camera_direction;
+	double x;
+	double y;
+	Vector2_d camera_direction;
 }player_t;
 
 void run_game();
